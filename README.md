@@ -48,40 +48,53 @@
 
 ## 安装
 
-```bash
-pip install -r requirements.txt
+> 以下步骤在 macOS 上一键完成，Windows 暂不支持。
 
-# macOS 语音录制
+### 第一步：克隆 + 装依赖
+```bash
+git clone https://github.com/status-code-404/nico_desktop_pet.git
+cd nico_desktop_pet
+pip install -r requirements.txt
+```
+
+### 第二步：装语音录制依赖
+```bash
 brew install portaudio
 pip install pyaudio
-
-# Whisper 依赖 ffmpeg（已 bundled: backend/bin/ffmpeg）
 ```
 
-## 配置
-
+### 第三步：配置 API Key
 ```bash
 cp .env.example .env
-vim .env  # 填入 API Key
+vim .env
 ```
 
-### 必填
+**必须填写的 3 个 Key：**
 
-| 变量 | 说明 |
-|------|------|
-| `DEEPSEEK_API_KEY` | DeepSeek API (LLM) |
-| `DASHSCOPE_API_KEY` | 阿里云百炼 (TTS) |
-| `TAVILY_API_KEY` | Tavily 搜索 API |
+| Key | 去哪获取 |
+|-----|---------|
+| `DEEPSEEK_API_KEY` | https://platform.deepseek.com |
+| `DASHSCOPE_API_KEY` | https://bailian.console.aliyun.com |
+| `TAVILY_API_KEY` | https://tavily.com （免费 1000 次/月） |
 
-### 可选
+### 第四步：启动
+```bash
+bash start.sh
+```
+
+> 首次运行会自动下载 Whisper 模型（~140MB），后续无需重复下载。
+> ffmpeg 已内置在 `backend/bin/`，无需额外安装。
+
+## 可选配置
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `CHAT_MEMORY_ENABLED` | false | 对话上下文 |
 | `CHAT_SEARCH_ENABLED` | true | 联网搜索 |
 | `TTS_PROVIDER` | aliyun | aliyun / local |
+| `TTS_CONCURRENCY` | 3 | TTS 并发数 |
 | `DEBUG_VOICE` | false | 打印语音转录 |
-| `PET_WIDTH` | 180 | 前端宠物尺寸 |
+| `PET_WIDTH` | 180 | 宠物尺寸 |
 | `PET_FPS` | 24 | 动画帧率 |
 
 ## 启动
