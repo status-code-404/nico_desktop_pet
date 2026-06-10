@@ -105,9 +105,8 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
 
     # ── TTS Performance ──
-    # Concurrency: more → faster but may hit Aliyun rate limit (Throttling.RateQuota).
-    # Recommended: 2 (safe) ~ 4 (aggressive, may trigger 429).
-    tts_concurrency: int = 2  # 阿里云免费版QPS上限≈2
+    # TTS 并发上限。阿里云免费账号 QPS≈3，超出触发 Throttling.RateQuota。
+    tts_concurrency: int = 3  # 阿里云免费版QPS上限≈2
     chat_max_tokens: int = 512  # ~250 Chinese chars
 
     model_config = {
