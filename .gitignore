@@ -24,7 +24,6 @@ data/face_encodings/
 data/models/whisper/
 data/models/cosyvoice/
 backend/bin/ffmpeg
-resources/frames/
 
 # Generated
 result/
