@@ -2,6 +2,8 @@
 
 基于 Python 的全栈桌面宠物，角色为《原神》魔女会成员妮可（Nicole / N）。
 
+🎬 **视频演示**：https://b23.tv/evQQJIY
+
 > **当前仅支持 macOS**。Windows 版本开发中，敬请期待。
 
 ## 功能
