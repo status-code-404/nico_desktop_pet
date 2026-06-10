@@ -2,6 +2,8 @@
 
 基于 Python 的全栈桌面宠物，角色为《原神》魔女会成员妮可（Nicole / N）。
 
+> **当前仅支持 macOS**。Windows 版本开发中，敬请期待。
+
 ## 功能
 
 - **LLM 对话** — deepseek-v4-flash，妮可角色人设，可配置上下文记忆

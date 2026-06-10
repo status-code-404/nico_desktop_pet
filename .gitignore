@@ -31,3 +31,9 @@ result/
 # Backward compat (old structure, to be removed)
 backend/python/
 CosyVoice/
+
+# Keep folder structure, ignore large model files
+data/models/whisper/*.pt
+data/models/cosyvoice/*
+!data/models/cosyvoice/.gitkeep
+!data/models/whisper/.gitkeep
