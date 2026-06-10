@@ -20,6 +20,7 @@ _SEARCH_TRIGGERS = [
     "酒店", "住宿", "旅游", "攻略", "景点", "推荐", "好吃", "美食",
     "餐厅", "游玩", "出行",
     "背诵", "朗读", "念", "全文", "诗词",
+    "星期", "几号", "日期", "时间",
 ]
 
 
@@ -27,11 +28,25 @@ def _should_search(message: str) -> bool:
     return any(kw in message for kw in _SEARCH_TRIGGERS)
 
 
+def _local_info(message: str) -> str:
+    """Return local info for queries that don't need web search."""
+    from datetime import datetime
+    weekdays = ["星期一","星期二","星期三","星期四","星期五","星期六","星期日"]
+    now = datetime.now()
+    lines = [f"今天是{now.year}年{now.month}月{now.day}日，{weekdays[now.weekday()]}。"]
+    if "几月" in message or "几号" in message or "日期" in message:
+        lines.append(f"当前日期：{now.year}-{now.month:02d}-{now.day:02d}")
+    return "\n".join(lines)
+
+
 def _web_search(query: str) -> str:
     try:
         from tavily import TavilyClient
+        from datetime import datetime
         client = TavilyClient(api_key=settings.tavily_api_key)
-        result = client.search(query, max_results=3, search_depth="basic")
+        # Add current year for freshness
+        q = f"{query} {datetime.now().year}"
+        result = client.search(q, max_results=3, search_depth="basic")
         if not result.get("results"):
             return ""
         return "搜索结果：\n" + "\n".join(
@@ -54,9 +69,11 @@ class LLMClient:
     async def chat(self, message: str, *, context: str = "") -> str:
         user_msg = message
         if settings.chat_search_enabled and _should_search(message):
+            li = _local_info(message)
             sr = _web_search(message)
-            if sr:
-                user_msg = f"{message}\n\n{sr}"
+            info = "\n".join(filter(None, [li, sr]))
+            if info:
+                user_msg = f"{message}\n\n{info}"
 
         if settings.chat_memory_enabled:
             self._history.append({"role": "user", "content": message})
@@ -76,9 +93,11 @@ class LLMClient:
     async def chat_stream(self, message: str, *, context: str = "") -> AsyncIterator[str]:
         user_msg = message
         if settings.chat_search_enabled and _should_search(message):
+            li = _local_info(message)
             sr = _web_search(message)
-            if sr:
-                user_msg = f"{message}\n\n{sr}"
+            info = "\n".join(filter(None, [li, sr]))
+            if info:
+                user_msg = f"{message}\n\n{info}"
 
         if settings.chat_memory_enabled:
             self._history.append({"role": "user", "content": message})
