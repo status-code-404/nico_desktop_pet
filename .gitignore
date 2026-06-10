@@ -21,8 +21,6 @@ data/voice_recordings/
 data/face_encodings/
 
 # Large files
-data/models/whisper/
-data/models/cosyvoice/
 backend/bin/ffmpeg
 
 # Generated
@@ -33,7 +31,7 @@ backend/python/
 CosyVoice/
 
 # Keep folder structure, ignore large model files
+# Models - keep dirs, ignore large files
 data/models/whisper/*.pt
-data/models/cosyvoice/*
-!data/models/cosyvoice/.gitkeep
-!data/models/whisper/.gitkeep
+data/models/cosyvoice/CosyVoice*
+data/models/cosyvoice/*.json
