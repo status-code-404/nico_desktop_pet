@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+*.pyc
+
+# Runtime data
+data/screenshots/
+data/context_history/
+data/daily_reports/
+data/voice_recordings/
+data/face_encodings/
+
+# Large files
+data/models/whisper/
+data/models/cosyvoice/
+backend/bin/ffmpeg
+resources/frames/
+
+# Generated
+result/
+
+# Backward compat (old structure, to be removed)
+backend/python/
+CosyVoice/
