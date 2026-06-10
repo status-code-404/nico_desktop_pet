@@ -71,11 +71,11 @@ vim .env
 
 **必须填写的 3 个 Key：**
 
-| Key | 去哪获取 |
-|-----|---------|
-| `DEEPSEEK_API_KEY` | https://platform.deepseek.com |
-| `DASHSCOPE_API_KEY` | https://bailian.console.aliyun.com |
-| `TAVILY_API_KEY` | https://tavily.com （免费 1000 次/月） |
+| Key | 用途 | 去哪获取 | 缺了会怎样 |
+|-----|------|---------|-----------|
+| `DEEPSEEK_API_KEY` | LLM 对话推理 | https://platform.deepseek.com | 无法聊天 |
+| `DASHSCOPE_API_KEY` | TTS 语音合成 | https://bailian.console.aliyun.com | 只能看文字，没声音 |
+| `TAVILY_API_KEY` | 联网搜索 | https://tavily.com | 实时查询（天气/车票等）不可用 |
 
 ### 第四步：启动
 ```bash
