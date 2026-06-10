@@ -35,7 +35,11 @@ opencv-python-headless>=4.8.0
 face_recognition>=1.3.0
 
 # ── 搜索 ──
+tavily-python>=0.3.0
 ddgs>=6.0.0
+
+# ── WebSocket (TTS) ──
+websocket-client>=1.6.0
 
 # ── 前端 ──
 PyQt6>=6.5.0
