@@ -115,6 +115,13 @@ cd frontend && python main.py    # 前端
 | 搜索查询 | 5.6s | ~3s | ~9s |
 | 背诵岳阳楼记 (456字) | 6.5s | 11.9s (18片) | 18.4s |
 
+## 注意事项
+
+- **搜索引擎**：Tavily 免费版可能返回过期/不准确的缓存数据（幻读）。日期/时间类查询默认走本地 `datetime`，不依赖搜索。
+- **TTS 限流**：阿里云 CosyVoice 免费版 QPS 约 2-3，已配置 3/秒发送速率 + 不限在线并发。若遇到 `Throttling.RateQuota` 错误，调低 `.env` 中的 `TTS_CONCURRENCY`。
+- **语音识别**：需要 macOS 授予终端麦克风权限。测试识别效果：`cd server && python test_voice_whisper.py`。
+- **本地 TTS**：将 `TTS_PROVIDER=local` 可切换到本地 CosyVoice2-0.5B（需提前下载模型到 `data/models/cosyvoice/`）。
+
 ## License
 
 MIT
