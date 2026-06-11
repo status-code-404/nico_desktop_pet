@@ -1,0 +1,5 @@
+// API Keys — fill in your own
+DEEPSEEK_API_KEY = sk-your-key
+DASHSCOPE_API_KEY = sk-your-key
+TAVILY_API_KEY = tvly-dev-your-key
+NICOLE_VOICE_ID =
