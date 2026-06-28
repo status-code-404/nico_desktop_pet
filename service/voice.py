@@ -176,6 +176,7 @@ async def tts_stream_from_text(user_text: str):
 
     from core.tts.volcengine import duplex_stream
 
+    reply_text = [""]
     sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def llm_reader():
