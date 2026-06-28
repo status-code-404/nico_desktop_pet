@@ -285,7 +285,7 @@ async def transcribe_stream(
 
 async def transcribe_bytes(audio_data: bytes) -> str:
     """Transcribe full PCM16 audio buffer (non-streaming convenience)."""
-    chunk_size = 6400  # ~200ms @ 16kHz mono 16-bit
+    chunk_size = 32000  # ~1s @ 16kHz mono 16-bit — fewer chunks, faster
     final = ""
 
     async def chunked():

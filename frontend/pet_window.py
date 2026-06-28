@@ -42,7 +42,7 @@ def _needs_search(text: str) -> bool:
 # ── Audio recorder ────────────────────────────────────────────────
 
 class AudioRecorder(QThread):
-    finished = pyqtSignal(str)
+    finished = pyqtSignal(str)  # emits transcribed text now
 
     def __init__(self):
         super().__init__()
@@ -50,25 +50,36 @@ class AudioRecorder(QThread):
 
     def run(self):
         import pyaudio
-        self._frames = []
+        import websocket as _ws
+
         pa = pyaudio.PyAudio()
         stream = pa.open(format=pyaudio.paInt16, channels=1, rate=16000,
                          input=True, frames_per_buffer=1024)
         self._recording = True
-        print("[rec] started")
+        print("[rec] streaming via WS")
+
+        ws_url = BACKEND.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = f"{ws_url}/api/v1/voice/ws/transcribe"
+
         try:
+            ws = _ws.create_connection(ws_url, timeout=30)
+            # Stream chunks while recording
             while self._recording:
-                self._frames.append(stream.read(1024, exception_on_overflow=False))
-        except Exception as e: print(f"[rec] {e}")
-        stream.stop_stream(); stream.close(); pa.terminate()
-        if self._frames:
-            raw = b"".join(self._frames)
-            print(f"[rec] done: {len(raw)} bytes")
-            tmp = tempfile.mktemp(suffix=".wav", dir="/tmp")
-            with wave.open(tmp, "wb") as wf:
-                wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
-                wf.writeframes(raw)
-            self.finished.emit(tmp)
+                data = stream.read(1024, exception_on_overflow=False)
+                ws.send_binary(data)
+            # Recording stopped — signal done, get text
+            ws.send('{"done":true}')
+            text = ws.recv()
+            ws.close()
+            print(f"[rec] done, text={text!r}")
+            if text and text.strip():
+                self.finished.emit(text.strip())
+        except Exception as e:
+            print(f"[rec] WS error: {e}")
+        finally:
+            stream.stop_stream()
+            stream.close()
+            pa.terminate()
 
     def stop(self): self._recording = False
 
@@ -302,33 +313,18 @@ class PetWindow(QWidget):
                          args=(text,), kwargs={"thinking": is_search},
                          daemon=True).start()
 
-    def _on_voice(self, path):
-        """path is a WAV file. Upload to backend for STT, then LLM+TTS."""
+    def _on_voice(self, text):
+        """text is the transcribed result from streaming ASR."""
         self._cancel_current()
-        threading.Thread(target=self._do_voice, args=(path,), daemon=True).start()
-
-    def _do_voice(self, path):
-        self._cancelled = False
-        try:
-            with open(path, "rb") as f:
-                resp = requests.post(f"{BACKEND}/api/v1/voice/transcribe",
-                                     files={"file": f}, timeout=15)
-            if resp.status_code != 200 or self._cancelled:
-                return
-            user_text = resp.json().get("text", "")
-            print(f"[pet] STT: {user_text!r}")
-            if not user_text:
-                return
-            is_search = _needs_search(user_text)
-            if is_search:
-                QTimer.singleShot(0, self._think_on)
-            self._stream_tts(user_text, thinking=is_search)
-        except Exception as e:
-            print(f"[pet] voice err: {e}")
-            QTimer.singleShot(0, self._think_off)
-        finally:
-            try: os.unlink(path)
-            except OSError: pass
+        print(f"[pet] STT: {text!r}")
+        if not text or not text.strip():
+            return
+        is_search = _needs_search(text)
+        if is_search:
+            QTimer.singleShot(0, self._think_on)
+        threading.Thread(target=self._stream_tts,
+                         args=(text,), kwargs={"thinking": is_search},
+                         daemon=True).start()
 
     def _cancel_current(self):
         """Kill audio, close TTS stream, mark cancelled."""
