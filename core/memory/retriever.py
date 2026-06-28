@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 from .config import DIMENSION_KEYS
 from .profile import profile_store
-from .store import vector_store
+from . import store
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ def search(query: str, top_k: int = 5) -> dict:
 
     # 2. Vague/episodic query → episodic + all dimensions
     if len(query) < 10 or any(w in query for w in ["刚刚", "之前", "前面", "上次"]):
-        results = vector_store.query_all(query, top_k=min(top_k * 2, 10))
+        results = store.query_all(query, top_k=min(top_k * 2, 10))
         result["results"] = results
         if results:
             result["answer"] = results[0]["text"]
@@ -133,7 +133,7 @@ def search(query: str, top_k: int = 5) -> dict:
 
     # 3. Semantic cross-dimension query
     dims = _route_dimensions(query)
-    results = vector_store.query_all(query, top_k=top_k, dimensions=dims)
+    results = store.query_all(query, top_k=top_k, dimensions=dims)
 
     # Merge with profile data if relevant
     if any(d in ["identity", "health", "preferences", "goals"] for d in dims):

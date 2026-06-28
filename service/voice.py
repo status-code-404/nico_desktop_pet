@@ -9,6 +9,7 @@ import re
 
 from server.config import settings
 from core.llm.client import llm_client
+from core.memory import collector as memory_collector
 from core.stt.whisper import transcribe_upload
 
 TTS_CHUNK_SIZE = 40
@@ -172,6 +173,7 @@ async def tts_stream_from_text(user_text: str):
         buf = ""
         try:
             async for token in llm_client.chat_stream(user_text):
+                reply_text[0] += token
                 buf += token
                 if token in "。！？\n" or len(buf) >= DUPLEX_FLUSH_CHARS:
                     await sentence_queue.put(buf)
@@ -180,6 +182,9 @@ async def tts_stream_from_text(user_text: str):
                 await sentence_queue.put(buf)
         finally:
             await sentence_queue.put(None)
+            if reply_text[0].strip():
+                memory_collector.record("user", user_text)
+                memory_collector.record("assistant", reply_text[0])
 
     async def sentence_feeder():
         while True:

@@ -15,7 +15,7 @@ from collections import deque
 
 from .config import DIMENSION_KEYS
 from .profile import profile_store
-from .store import vector_store
+from . import store as vector_store
 
 logger = logging.getLogger(__name__)
 
