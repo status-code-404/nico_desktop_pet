@@ -40,6 +40,14 @@ async def lifespan(app: FastAPI):
     print(f"[nicole] server starting on {settings.backend_host}:{settings.backend_port}")
     print(f"[nicole] LLM    = {settings.deepseek_model} @ {settings.deepseek_base_url}")
     print(f"[nicole] Whisper = {settings.whisper_model_size}")
+    # Pre-load Whisper model (always warm, even if volcengine is current provider)
+    import asyncio as _asyncio
+    loop = _asyncio.get_running_loop()
+    try:
+        from core.stt.whisper import preload as _preload
+        await loop.run_in_executor(None, _preload)
+    except Exception:
+        pass
     _cleanup_thread.start()
     yield
     print("[nicole] shutting down")

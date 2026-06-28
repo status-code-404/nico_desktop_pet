@@ -3,6 +3,7 @@ Desktop pet — Nicole. Simple version, no QThread workers.
 """
 
 import os
+import struct
 import subprocess as sp
 import sys
 import tempfile
@@ -20,6 +21,22 @@ from PyQt6.QtWidgets import (
 )
 
 BACKEND = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+FFMPEG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "backend", "bin", "ffmpeg")
+
+_SEARCH_TRIGGERS = [
+    "天气", "气温", "预报", "新闻", "股价", "汇率", "最新", "今天", "实时",
+    "怎么样", "多少钱", "几度", "多少度", "搜索", "查到", "查找",
+    "谁是", "什么是", "什么时候", "几点", "在哪", "如何", "怎么去",
+    "车票", "火车", "高铁", "机票", "航班", "多少", "价格",
+    "酒店", "住宿", "旅游", "攻略", "景点", "推荐", "好吃", "美食",
+    "餐厅", "游玩", "出行",
+    "背诵", "朗读", "念", "全文", "诗词",
+    "星期", "几号", "日期", "时间",
+]
+
+def _needs_search(text: str) -> bool:
+    return any(kw in text for kw in _SEARCH_TRIGGERS)
 
 
 # ── Audio recorder ────────────────────────────────────────────────
@@ -38,7 +55,7 @@ class AudioRecorder(QThread):
         stream = pa.open(format=pyaudio.paInt16, channels=1, rate=16000,
                          input=True, frames_per_buffer=1024)
         self._recording = True
-        print("[rec] started (pyaudio)")
+        print("[rec] started")
         try:
             while self._recording:
                 self._frames.append(stream.read(1024, exception_on_overflow=False))
@@ -184,6 +201,8 @@ class PetWindow(QWidget):
 
         self._drag_pos = None; self._thinking = False
         self._current_player = None; self._current_tts_stream = None; self._cancelled = False
+        self._current_ffmpeg = None; self._current_pa_stream = None
+        self._pa = None  # lazy init
         self._update()
         normal_frames = self._frames["normal"]
         w = normal_frames[0].width(); h = normal_frames[0].height()
@@ -273,18 +292,58 @@ class PetWindow(QWidget):
     # ── input ──────────────────────────────────────────────────
 
     def _on_text(self, text):
+        print(f"[pet] _on_text called: {text!r}")
         self._cancel_current()
-        self._think_on()
-        threading.Thread(target=self._do_text, args=(text,), daemon=True).start()
+        is_search = _needs_search(text)
+        if is_search:
+            self._think_on()
+        print(f"[pet] starting _stream_tts thread...")
+        threading.Thread(target=self._stream_tts,
+                         args=(text,), kwargs={"thinking": is_search},
+                         daemon=True).start()
 
     def _on_voice(self, path):
+        """path is a WAV file. Upload to backend for STT, then LLM+TTS."""
         self._cancel_current()
-        self._think_on()
         threading.Thread(target=self._do_voice, args=(path,), daemon=True).start()
+
+    def _do_voice(self, path):
+        self._cancelled = False
+        try:
+            with open(path, "rb") as f:
+                resp = requests.post(f"{BACKEND}/api/v1/voice/transcribe",
+                                     files={"file": f}, timeout=15)
+            if resp.status_code != 200 or self._cancelled:
+                return
+            user_text = resp.json().get("text", "")
+            print(f"[pet] STT: {user_text!r}")
+            if not user_text:
+                return
+            is_search = _needs_search(user_text)
+            if is_search:
+                QTimer.singleShot(0, self._think_on)
+            self._stream_tts(user_text, thinking=is_search)
+        except Exception as e:
+            print(f"[pet] voice err: {e}")
+            QTimer.singleShot(0, self._think_off)
+        finally:
+            try: os.unlink(path)
+            except OSError: pass
 
     def _cancel_current(self):
         """Kill audio, close TTS stream, mark cancelled."""
+        print("[pet] cancel")
         self._cancelled = True
+        if self._current_pa_stream:
+            try: self._current_pa_stream.stop_stream()
+            except: pass
+            try: self._current_pa_stream.close()
+            except: pass
+            self._current_pa_stream = None
+        if self._current_ffmpeg:
+            try: self._current_ffmpeg.kill()
+            except: pass
+            self._current_ffmpeg = None
         if self._current_player:
             try: self._current_player.kill()
             except: pass
@@ -294,83 +353,72 @@ class PetWindow(QWidget):
             except: pass
             self._current_tts_stream = None
 
-    # ── worker functions (run in thread) ───────────────────────
-
-    def _do_text(self, text):
+    def _stream_tts(self, text: str, *, thinking: bool = False):
+        """LLM+TTS stream → FIFO → ffmpeg → pyaudio 流式播放."""
+        import pyaudio
         self._cancelled = False
-        print(f"[pet] INPUT: {text!r}")
+        if self._pa is None:
+            self._pa = pyaudio.PyAudio()
         try:
-            resp = requests.post(f"{BACKEND}/api/v1/chat",
-                                 json={"message": text, "include_context": False}, timeout=30)
-            reply = resp.json().get("content", "")
-            print(f"[pet] {reply}")
-            # Show bubble
-            QTimer.singleShot(0, lambda r=reply: self._bubble.show_text(r, self))
-            # TTS streaming: play each file as it arrives
-            self._current_tts_stream = requests.post(f"{BACKEND}/api/v1/voice/tts",
-                data={"text": reply}, timeout=120, stream=True)
-            resp2 = self._current_tts_stream
-            if resp2.status_code == 200 and not self._cancelled:
-                first = True
-                for line in resp2.iter_lines():
-                    if self._cancelled: break
-                    if not line: continue
-                    import json as _json
-                    f = _json.loads(line).get("file")
-                    if f:
-                        print(f"[pet] playing {f}")
-                        if first:
-                            self._thinking_done.emit()
-                            first = False
-                        self._play_file(f)
-                        try: os.unlink(f)
-                        except OSError: pass
-            else:
-                print(f"[pet] TTS failed: HTTP {resp2.status_code}")
-                QTimer.singleShot(0, self._think_off)
-        except Exception as e:
-            print(f"[pet] err: {e}")
-            QTimer.singleShot(0, self._think_off)
+            self._current_tts_stream = requests.post(
+                f"{BACKEND}/api/v1/voice/tts/stream",
+                data={"text": text}, timeout=120, stream=True)
+            resp = self._current_tts_stream
+            if resp.status_code != 200 or self._cancelled:
+                if thinking: QTimer.singleShot(0, self._think_off)
+                return
 
-    def _do_voice(self, path):
-        self._cancelled = False
-        try:
-            with open(path, "rb") as f:
-                resp = requests.post(f"{BACKEND}/api/v1/voice/chat",
-                                     files={"file": f}, timeout=30)
-            if resp.status_code == 200:
-                reply = resp.json().get("content", "")
-                print(f"[pet] voice reply: {reply}")
-                QTimer.singleShot(0, lambda r=reply: self._bubble.show_text(r, self))
-                # TTS streaming
-                self._current_tts_stream = requests.post(f"{BACKEND}/api/v1/voice/tts",
-                    data={"text": reply}, timeout=120, stream=True)
-                resp2 = self._current_tts_stream
-                if resp2.status_code == 200 and not self._cancelled:
-                    first = True
-                    for line in resp2.iter_lines():
-                        if self._cancelled: break
-                        if not line: continue
-                        import json as _json
-                        f = _json.loads(line).get("file")
-                        if f:
-                            f = os.path.abspath(f)
-                            print(f"[pet] playing {f}")
-                            if first:
-                                QTimer.singleShot(0, self._think_off)
-                                first = False
-                            self._play_file(f)
-                            try: os.unlink(f)
-                            except OSError: pass
-                else:
-                    print(f"[pet] voice TTS failed: HTTP {resp2.status_code}")
-                    QTimer.singleShot(0, self._think_off)
-        except Exception as e:
-            print(f"[pet] voice err: {e}")
-            QTimer.singleShot(0, self._think_off)
-        finally:
-            try: os.unlink(path)
+            fifo = f"/tmp/nicole_fifo_{os.getpid()}.fifo"
+            try: os.unlink(fifo)
             except OSError: pass
+            os.mkfifo(fifo)
+
+            first = [True]
+            def _feed():
+                try:
+                    with open(fifo, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=4096):
+                            if self._cancelled: break
+                            if chunk:
+                                f.write(chunk)
+                                f.flush()
+                                if first[0]:
+                                    first[0] = False
+                                    if thinking:
+                                        QTimer.singleShot(0, self._think_off)
+                except Exception:
+                    pass
+            threading.Thread(target=_feed, daemon=True).start()
+
+            self._current_ffmpeg = sp.Popen([
+                FFMPEG, "-v", "quiet", "-i", fifo,
+                "-f", "s16le", "-ar", "24000", "-ac", "1", "pipe:1",
+            ], stdout=sp.PIPE)
+            self._current_pa_stream = self._pa.open(
+                format=pyaudio.paInt16, channels=1, rate=24000,
+                output=True, frames_per_buffer=1024)
+
+            while True:
+                pcm = self._current_ffmpeg.stdout.read(4096)
+                if not pcm or self._cancelled: break
+                self._current_pa_stream.write(pcm)
+
+            self._current_pa_stream.stop_stream()
+            self._current_pa_stream.close()
+            self._current_pa_stream = None
+            self._current_ffmpeg.stdout.close()
+            self._current_ffmpeg.wait()
+            try: os.unlink(fifo)
+            except OSError: pass
+        except Exception as e:
+            print(f"[pet] tts err: {e}")
+            if thinking: QTimer.singleShot(0, self._think_off)
+        finally:
+            if self._current_pa_stream:
+                try: self._current_pa_stream.close()
+                except: pass
+                self._current_pa_stream = None
+            self._current_ffmpeg = None
 
     def _play_file(self, path: str):
         """Play WAV, blocking. Can be killed by _cancel_current."""

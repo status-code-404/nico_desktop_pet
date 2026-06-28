@@ -1,6 +1,5 @@
-import os, sys; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 """
-Whisper STT — local model with bundled ffmpeg.
+Whisper STT — openai-whisper (local model, bundled ffmpeg).
 """
 
 import asyncio
@@ -60,6 +59,11 @@ async def save_upload(upload_file, target_dir: str | None = None) -> str:
     with open(path, "wb") as f:
         f.write(content)
     return path
+
+
+def preload():
+    """Pre-load Whisper model at startup (saves 1-2s on first request)."""
+    get_model()
 
 
 async def transcribe_upload(upload_file, language: str | None = None) -> dict:

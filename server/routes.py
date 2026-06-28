@@ -2,10 +2,14 @@
 API routes — thin HTTP layer, delegates to service/
 """
 
+import asyncio
+import contextlib
+import logging
+import os
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 
 from server.config import settings
@@ -17,6 +21,8 @@ from server.schemas import (
 from service import chat as chat_svc
 from service import face as face_svc
 from service import voice as voice_svc
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -47,7 +53,79 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(gen(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
-# ═══════════════════════════════════════════════════════════ Voice
+# ═══════════════════════════════════════════════════════════ Voice (WebSocket streaming)
+
+@router.websocket("/api/v1/voice/ws/transcribe")
+async def voice_transcribe_ws(ws: WebSocket):
+    """流式 ASR: 前端录音时发音频块，停录后收完整文本。"""
+    await ws.accept()
+
+    if settings.stt_provider == "volcengine":
+        from core.stt.volcengine_asr import transcribe_stream
+        import io as _io
+
+        # Accumulate PCM chunks + pipe to Volcengine ASR concurrently
+        text_queue: asyncio.Queue[str] = asyncio.Queue()
+        pcm_chunks: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+        async def asr_worker():
+            async def chunked():
+                while True:
+                    c = await pcm_chunks.get()
+                    if c is None:
+                        break
+                    yield c
+
+            last_text = ""
+            async for text in transcribe_stream(chunked()):
+                if text != last_text:
+                    last_text = text
+            await text_queue.put(last_text)
+
+        asr_task = asyncio.create_task(asr_worker())
+
+        try:
+            while True:
+                data = await ws.receive()
+                if "text" in data:
+                    # JSON "done" signal
+                    await pcm_chunks.put(None)
+                    break
+                elif "bytes" in data:
+                    await pcm_chunks.put(data["bytes"])
+        except WebSocketDisconnect:
+            await pcm_chunks.put(None)
+        finally:
+            text = await asyncio.wait_for(text_queue.get(), timeout=30)
+            asr_task.cancel()
+            with contextlib.suppress(Exception):
+                await asr_task
+            await ws.send_text(text)
+    else:
+        # Whisper: collect all audio, then transcribe
+        import wave, io as _io, tempfile
+        audio_data = bytearray()
+        try:
+            while True:
+                data = await ws.receive()
+                if "text" in data:
+                    break
+                elif "bytes" in data:
+                    audio_data.extend(data["bytes"])
+        except WebSocketDisconnect:
+            pass
+
+        # Save to temp WAV and transcribe
+        fd, path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        with wave.open(path, "wb") as wf:
+            wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
+            wf.writeframes(bytes(audio_data))
+        from core.stt.whisper import transcribe
+        result = await transcribe(path)
+        try: os.unlink(path)
+        except OSError: pass
+        await ws.send_text(result.get("text", ""))
 
 @router.post("/api/v1/voice/transcribe")
 async def voice_transcribe(file: UploadFile = File(...), language: Optional[str] = Form(None)):
@@ -86,6 +164,41 @@ async def voice_chat_audio(file: UploadFile = File(...), language: Optional[str]
         return FileResponse(path, media_type="audio/wav", filename=f"nicole_{uuid.uuid4().hex[:8]}.wav")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/v1/voice/chat/stream")
+async def voice_chat_stream(file: UploadFile = File(...), language: Optional[str] = Form(None)):
+    """全链路流式: STT → LLM stream → 双工 TTS → 音频实时输出.
+
+    返回 audio/mpeg 流，chunk 是 MP3 片段可边收边播.
+    """
+    async def audio_stream():
+        try:
+            async for chunk in voice_svc.chat_audio_stream(file):
+                # text events (for frontend subtitle display)
+                if isinstance(chunk, str) and chunk.startswith("file:"):
+                    continue  # skip old format
+                yield chunk
+        except Exception as e:
+            logger.exception("voice chat stream error")
+    return StreamingResponse(audio_stream(), media_type="audio/mpeg")
+
+
+@router.post("/api/v1/voice/tts/stream")
+async def voice_tts_stream(text: str = Form(...)):
+    """文本 → LLM流式 + 双工TTS → 即时音频流.
+
+    返回纯 audio/mpeg，无文本前缀。LLM出第一句即合成，不等全文.
+    文本气泡由前端单独通过 /api/v1/chat/stream SSE 获取.
+    """
+
+    async def audio_stream():
+        async for chunk in voice_svc.tts_stream_from_text(text):
+            if isinstance(chunk, str) and chunk.startswith("file:"):
+                continue
+            yield chunk
+
+    return StreamingResponse(audio_stream(), media_type="audio/mpeg")
 
 # ═══════════════════════════════════════════════════════════ Face
 

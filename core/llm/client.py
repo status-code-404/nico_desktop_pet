@@ -4,7 +4,10 @@ LLM client — DeepSeek via OpenAI API, with Tavily search injection.
 
 from __future__ import annotations
 
+import json
+import os
 from collections import deque
+from pathlib import Path
 from typing import AsyncIterator
 
 from openai import AsyncOpenAI
@@ -65,6 +68,8 @@ class LLMClient:
         )
         self.model = settings.deepseek_model
         self._history: deque[dict] = deque(maxlen=settings.chat_history_limit)
+        self._history_file = Path(settings.data_dir) / "chat_history.json"
+        self._load_history()
 
     async def chat(self, message: str, *, context: str = "") -> str:
         user_msg = message
@@ -88,6 +93,7 @@ class LLMClient:
 
         if settings.chat_memory_enabled:
             self._history.append({"role": "assistant", "content": reply})
+            self._save_history()
         return reply
 
     async def chat_stream(self, message: str, *, context: str = "") -> AsyncIterator[str]:
@@ -118,6 +124,7 @@ class LLMClient:
 
         if settings.chat_memory_enabled:
             self._history.append({"role": "assistant", "content": full})
+            self._save_history()
 
     def _build_messages(self, user_message: str, *, context: str = "") -> list[dict]:
         system = NICOLE_SYSTEM_PROMPT
@@ -129,8 +136,31 @@ class LLMClient:
         msgs.append({"role": "user", "content": user_message})
         return msgs
 
+    def _load_history(self):
+        """Restore conversation history from disk."""
+        if not self._history_file.exists():
+            return
+        try:
+            data = json.loads(self._history_file.read_text())
+            if isinstance(data, list):
+                for item in data[-settings.chat_history_limit:]:
+                    if isinstance(item, dict) and "role" in item and "content" in item:
+                        self._history.append(item)
+        except Exception:
+            pass
+
+    def _save_history(self):
+        """Persist conversation history to disk."""
+        try:
+            self._history_file.parent.mkdir(parents=True, exist_ok=True)
+            self._history_file.write_text(
+                json.dumps(list(self._history), ensure_ascii=False, indent=2))
+        except Exception:
+            pass
+
     def clear_history(self):
         self._history.clear()
+        self._save_history()
 
 
 llm_client = LLMClient()

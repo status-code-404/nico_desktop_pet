@@ -84,8 +84,22 @@ class Settings(BaseSettings):
     whisper_model_size: str = "base"
     ocr_languages: list[str] = ["ch_sim", "en"]
 
+    # ── STT ──
+    stt_provider: str = "whisper"  # "whisper" | "volcengine"
+
     # ── TTS ──
-    tts_provider: str = "aliyun"  # "aliyun" | "local"
+    tts_provider: str = "aliyun"  # "aliyun" | "local" | "volcengine"
+
+    # ── Volcengine ASR (豆包语音识别) ──
+    volcengine_asr_api_key: str = ""
+
+    # ── Volcengine (豆包语音合成) ──
+    volcengine_tts_api_key: str = ""
+    volcengine_tts_resource_id: str = "seed-tts-2.0"
+    volcengine_tts_speaker: str = "BV001_streaming"
+    volcengine_tts_model: str = "seed-tts-2.0-standard"
+    volcengine_tts_format: str = "mp3"
+    volcengine_tts_sample_rate: int = 24000
 
     # ── Local TTS (CosyVoice2-0.5B zero-shot) ──
     tts_local_model: str = "CosyVoice2-0.5B"  # subdir under cosyvoice_model_dir
@@ -107,7 +121,7 @@ class Settings(BaseSettings):
     # ── TTS Performance ──
     # TTS 并发上限。阿里云免费账号 QPS≈3，超出触发 Throttling.RateQuota。
     tts_concurrency: int = 3  # 阿里云免费版QPS上限≈2
-    chat_max_tokens: int = 512  # ~250 Chinese chars
+    chat_max_tokens: int = 400  # ~200 Chinese chars
 
     model_config = {
         "env_file": str(_PROJECT_ROOT / ".env"),
