@@ -1,15 +1,24 @@
 # Desktop Pet Nicole — 桌面宠物妮可
 
-基于 Python 的全栈桌面宠物，角色为《原神》魔女会成员妮可（Nicole / N）。
+基于 Python 的全栈桌面宠物，角色为《原神》魔女会成员妮可（Nicole / N，6.6 版本角色）。
 
 🎬 **视频演示**：https://b23.tv/evQQJIY
 
 > **当前仅支持 macOS**。Windows 版本开发中，敬请期待。
 
+## v2 更新 (2026-06)
+
+- **全双工 LLM+TTS** — LLM 边出字边送 TTS 合成，不等全文，首音延迟 ~1.5s
+- **豆包双向流式 TTS** — Volcengine SeedTTS binary framing 协议，单 WS 连接内并发收发
+- **豆包流式 ASR** — WebSocket 边录边传，停录即得文本 (~200ms)
+- **FIFO 流式播放** — 前端 named pipe → ffmpeg 解码 → pyaudio 即时播放，首块即出声
+- **妮可 6.6 完整人设** — 弃声的天使、魔女会 N、六千岁话痨，纯语音风格
+- **Whisper 预热** — 启动时预加载模型，首次 STT 不再等待 6s
+
 ## 功能
 
-- **LLM 对话** — deepseek-v4-flash，妮可角色人设，可配置上下文记忆
-- **语音交互** — Whisper 语音识别 + 阿里云 CosyVoice 声音克隆（流式 TTS，3 路并发生成）
+- **LLM 对话** — deepseek-chat，妮可角色人设，流式输出
+- **语音交互** — Whisper / 豆包流式 ASR + 豆包双工 TTS（全双工，~1.5s 首音）
 - **联网搜索** — Tavily 搜索 API 注入，实时天气/车票/酒店/新闻查询
 - **透明桌面动画** — PyQt6 帧动画，四状态（待机/提问/思考/回答），可拖拽
 - **打断响应** — 新输入/录音时自动取消当前播放和请求
@@ -19,23 +28,24 @@
 
 ```
 ├── server/                # FastAPI 入口
-│   ├── main.py            # 启动 + 后台音频清理
+│   ├── main.py            # 启动 + 后台音频清理 + Whisper 预热
 │   ├── config.py          # 全局配置 (.env → pydantic)
-│   ├── routes.py          # 所有 API 路由
+│   ├── routes.py          # 所有 API + WebSocket 路由
 │   └── schemas.py         # Pydantic 数据模型
 ├── service/               # 业务逻辑层
+│   ├── voice.py           # 语音服务 (STT 调度 + LLM + TTS 全双工)
 │   ├── chat.py            # 对话服务
-│   ├── voice.py           # 语音服务 (STT + LLM + TTS 分片/并发/流式)
 │   ├── face.py            # 人脸服务 (检测/识别/喝水)
 │   └── drink_water.py     # 喝水提醒 (TODO)
 ├── core/                  # 基础模块
 │   ├── llm/               # DeepSeek client + Nicole 角色提示词
-│   ├── stt/               # Whisper 语音转文字
-│   ├── tts/               # 阿里云/本地 TTS
+│   ├── stt/               # Whisper / 豆包流式 ASR
+│   ├── tts/               # 豆包双工 TTS / 阿里云 TTS
 │   └── vision/            # 人脸检测/识别
 ├── frontend/              # PyQt6 桌面宠物
 │   ├── main.py            # 入口 (读取 .env 配置尺寸/FPS)
 │   └── pet_window.py      # 透明窗口 + 帧动画 + 输入框 + 对话气泡 + 语音
+│       └─ FIFO + ffmpeg + pyaudio 流式播放
 ├── resources/             # 素材
 │   ├── frames/            # 帧动画 (normal/question/thinking/answering)
 │   ├── mov/               # 原始 ProRes 4444 MOV
@@ -71,13 +81,19 @@ cp .env.example .env
 vim .env
 ```
 
-**必须填写的 3 个 Key：**
+**必须填写的 Key：**
 
-| Key | 用途 | 去哪获取 | 缺了会怎样 |
-|-----|------|---------|-----------|
-| `DEEPSEEK_API_KEY` | LLM 对话推理 | https://platform.deepseek.com | 无法聊天 |
-| `DASHSCOPE_API_KEY` | TTS 语音合成 | https://bailian.console.aliyun.com | 只能看文字，没声音 |
-| `TAVILY_API_KEY` | 联网搜索 | https://tavily.com | 实时查询（天气/车票等）不可用 |
+| Key | 用途 | 去哪获取 |
+|-----|------|---------|
+| `DEEPSEEK_API_KEY` | LLM 对话推理 | https://platform.deepseek.com |
+| `VOLCENGINE_TTS_API_KEY` | TTS 语音合成（豆包） | https://console.volcengine.com/speech |
+| `TAVILY_API_KEY` | 联网搜索 | https://tavily.com |
+
+**可选 Key：**
+
+| Key | 用途 |
+|-----|------|
+| `VOLCENGINE_ASR_API_KEY` | 豆包流式 ASR（不填则用本地 Whisper） |
 
 ### 第四步：启动
 ```bash
@@ -91,13 +107,14 @@ bash start.sh
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
+| `STT_PROVIDER` | whisper | whisper / volcengine |
+| `TTS_PROVIDER` | volcengine | volcengine / aliyun / local |
 | `CHAT_MEMORY_ENABLED` | false | 对话上下文 |
 | `CHAT_SEARCH_ENABLED` | true | 联网搜索 |
-| `TTS_PROVIDER` | aliyun | aliyun / local |
-| `TTS_CONCURRENCY` | 3 | TTS 并发数 |
 | `DEBUG_VOICE` | false | 打印语音转录 |
 | `PET_WIDTH` | 180 | 宠物尺寸 |
 | `PET_FPS` | 24 | 动画帧率 |
+| `DRINK_REMINDER_HOURS` | 1.5 | 喝水提醒间隔 |
 
 ## 启动
 
@@ -113,31 +130,37 @@ cd frontend && python main.py    # 前端
 | 端点 | 说明 |
 |------|------|
 | `POST /api/v1/chat` | 妮可文字对话 |
-| `POST /api/v1/chat/stream` | 流式对话 |
+| `POST /api/v1/chat/stream` | 流式对话 (SSE) |
 | `DELETE /api/v1/chat/history` | 清空上下文 |
 | `POST /api/v1/voice/transcribe` | 语音转文字 |
-| `POST /api/v1/voice/chat` | 语音对话（文字返回） |
-| `POST /api/v1/voice/tts` | 文字转语音（流式 NDJSON） |
+| `POST /api/v1/voice/tts` | TTS（流式 NDJSON） |
+| `POST /api/v1/voice/tts/stream` | TTS 全双工流（audio/mpeg） |
 | `POST /api/v1/voice/chat/audio` | 语音对话（音频返回） |
+| `WS /api/v1/voice/ws/transcribe` | 流式 ASR（WebSocket 边录边传） |
 | `POST /api/v1/face/detect` | 人脸检测 |
 | `POST /api/v1/face/register` | 注册人脸 |
 | `POST /api/v1/face/recognize` | 识别人脸 |
 | `GET /api/v1/health` | 健康检查 |
 
-## 性能 (当前配置)
+## 性能 (v2)
 
-| 场景 | LLM | TTS | 总 |
-|------|-----|-----|-----|
-| 打招呼 | 4.0s | 2.0s | 6.0s |
-| 搜索查询 | 5.6s | ~3s | ~9s |
-| 背诵岳阳楼记 (456字) | 6.5s | 11.9s (18片) | 18.4s |
+| 场景 | LLM 首token | TTS 首音 | 总首音 |
+|------|-----------|---------|--------|
+| 打招呼 (非搜索) | ~700ms | ~800ms | **~1.5s** |
+| 搜索查询 | ~700ms + 2s 搜索 | ~800ms | **~3.5s** |
+| 语音识别 (豆包 ASR) | — | — | **~200ms** |
+| 语音识别 (Whisper) | — | — | **~1.8s** |
 
-## 注意事项
+## 架构
 
-- **搜索引擎**：Tavily 免费版可能返回过期/不准确的缓存数据（幻读）。日期/时间类查询默认走本地 `datetime`，不依赖搜索。
-- **TTS 限流**：阿里云 CosyVoice 免费版 QPS 约 2-3，已配置 3/秒发送速率 + 不限在线并发。若遇到 `Throttling.RateQuota` 错误，调低 `.env` 中的 `TTS_CONCURRENCY`。
-- **语音识别**：需要 macOS 授予终端麦克风权限。测试识别效果：`cd server && python test_voice_whisper.py`。
-- **本地 TTS**：将 `TTS_PROVIDER=local` 可切换到本地 CosyVoice2-0.5B（需提前下载模型到 `data/models/cosyvoice/`）。
+```
+录音 → WebSocket 流式 ASR → 停录即得文本
+文字 → POST /voice/tts/stream
+         ├─ LLM chat_stream (DeepSeek) ────┐
+         └─ TTS duplex_stream (Volcengine) ─┘ 并发双工
+              → HTTP audio/mpeg stream
+                → 前端 FIFO → ffmpeg 解码 → pyaudio 播放
+```
 
 ## License
 
