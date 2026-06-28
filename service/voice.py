@@ -9,8 +9,17 @@ import re
 
 from server.config import settings
 from core.llm.client import llm_client
-from core.memory import collector as memory_collector
 from core.stt.whisper import transcribe_upload
+
+
+def _record_conversation(user_text: str, reply_text: str):
+    """Non-blocking wrapper for memory collection."""
+    try:
+        from core.memory import collector
+        collector.record("user", user_text)
+        collector.record("assistant", reply_text)
+    except Exception:
+        pass
 
 TTS_CHUNK_SIZE = 40
 DUPLEX_FLUSH_CHARS = 30  # flush to TTS after this many chars accumulated
@@ -182,9 +191,11 @@ async def tts_stream_from_text(user_text: str):
                 await sentence_queue.put(buf)
         finally:
             await sentence_queue.put(None)
+            # Fire-and-forget: background record to memory (zero overhead)
             if reply_text[0].strip():
-                memory_collector.record("user", user_text)
-                memory_collector.record("assistant", reply_text[0])
+                import asyncio as _aio
+                _aio.create_task(_aio.to_thread(
+                    _record_conversation, user_text, reply_text[0]))
 
     async def sentence_feeder():
         while True:
